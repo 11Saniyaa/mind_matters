@@ -6,6 +6,11 @@ const router = express.Router();
 
 // Journal Entry Schema
 const journalEntrySchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+  },
   date: { type: Date, default: Date.now },
   mood: { 
     type: String, 
@@ -29,10 +34,10 @@ const chatMessageSchema = new mongoose.Schema({
 
 const ChatMessage = mongoose.model("ChatMessage", chatMessageSchema);
 
-// Get all journal entries
+// Get all journal entries for the logged-in user
 router.get("/", async (req, res) => {
   try {
-    const entries = await JournalEntry.find().sort({ createdAt: -1 });
+    const entries = await JournalEntry.find({ user: req.user._id }).sort({ createdAt: -1 });
     res.json(entries);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -42,7 +47,7 @@ router.get("/", async (req, res) => {
 // Get a single journal entry
 router.get("/:id", async (req, res) => {
   try {
-    const entry = await JournalEntry.findById(req.params.id);
+    const entry = await JournalEntry.findOne({ _id: req.params.id, user: req.user._id });
     if (!entry) {
       return res.status(404).json({ message: "Entry not found" });
     }
@@ -58,6 +63,7 @@ router.post("/", async (req, res) => {
     const { mood, title, content, tags, moodScore } = req.body;
     
     const newEntry = new JournalEntry({
+      user: req.user._id,
       mood,
       title,
       content,
@@ -75,8 +81,8 @@ router.post("/", async (req, res) => {
 // Update journal entry
 router.put("/:id", async (req, res) => {
   try {
-    const updatedEntry = await JournalEntry.findByIdAndUpdate(
-      req.params.id,
+    const updatedEntry = await JournalEntry.findOneAndUpdate(
+      { _id: req.params.id, user: req.user._id },
       req.body,
       { new: true }
     );
@@ -92,7 +98,10 @@ router.put("/:id", async (req, res) => {
 // Delete journal entry
 router.delete("/:id", async (req, res) => {
   try {
-    const deletedEntry = await JournalEntry.findByIdAndDelete(req.params.id);
+    const deletedEntry = await JournalEntry.findOneAndDelete({ 
+      _id: req.params.id, 
+      user: req.user._id 
+    });
     if (!deletedEntry) {
       return res.status(404).json({ message: "Entry not found" });
     }
@@ -189,7 +198,7 @@ router.get("/analytics/mood-trends", async (req, res) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const moodTrends = await JournalEntry.aggregate([
-      { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+      { $match: { user: req.user._id, createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
           _id: {

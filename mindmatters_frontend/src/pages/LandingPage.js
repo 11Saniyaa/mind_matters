@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const cubeFaces = [
   { label: "Peace", quote: "Your mental health is a priority." },
@@ -23,6 +24,8 @@ const mentalHealthFacts = [
 
 export default function LandingPage() {
   const [faceIndex, setFaceIndex] = useState(0);
+  const { user, logout, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -33,6 +36,11 @@ export default function LandingPage() {
 
   const getFaceClass = (index) =>
     index === faceIndex ? "cube-face active" : "cube-face";
+
+  const handleLogout = () => {
+    logout();
+    navigate("/");
+  };
 
   return (
     <div>
@@ -260,6 +268,27 @@ export default function LandingPage() {
             <Link to="/features" className="nav-link">Features</Link>
             <Link to="/assessment" className="nav-link">Assessment</Link>
             <Link to="/journal" className="nav-link">Journal</Link>
+            {isAuthenticated ? (
+              <>
+                <span className="nav-link" style={{ color: "#93c5fd" }}>
+                  {user?.name}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="nav-link"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <Link to="/login" className="nav-link">Login</Link>
+            )}
           </div>
         </nav>
 
