@@ -1,45 +1,57 @@
-import mongoose from "mongoose";
+import pool from "../config/database.js";
 import bcrypt from "bcryptjs";
 
-const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, "Please provide a name"],
-    trim: true,
-  },
-  email: {
-    type: String,
-    required: [true, "Please provide an email"],
-    unique: true,
-    lowercase: true,
-    trim: true,
-    match: [/^\S+@\S+\.\S+$/, "Please provide a valid email"],
-  },
-  password: {
-    type: String,
-    required: [true, "Please provide a password"],
-    minlength: [6, "Password must be at least 6 characters"],
-    select: false, // Don't return password by default
-  },
-}, {
-  timestamps: true,
-});
-
-// Hash password before saving
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    return next();
+class User {
+  // Create a new user
+  static async create(userData) {
+    const { name, email, password } = userData;
+    
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
+    
+    const [result] = await pool.query(
+      "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+      [name, email, hashedPassword]
+    );
+    
+    return {
+      id: result.insertId,
+      name,
+      email,
+    };
   }
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
 
-// Method to compare passwords
-userSchema.methods.comparePassword = async function (candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
-};
+  // Find user by email
+  static async findByEmail(email) {
+    const [rows] = await pool.query(
+      "SELECT * FROM users WHERE email = ?",
+      [email]
+    );
+    return rows[0] || null;
+  }
 
-const User = mongoose.model("User", userSchema);
+  // Find user by ID
+  static async findById(id) {
+    const [rows] = await pool.query(
+      "SELECT id, name, email, created_at FROM users WHERE id = ?",
+      [id]
+    );
+    return rows[0] || null;
+  }
+
+  // Compare password
+  static async comparePassword(plainPassword, hashedPassword) {
+    return await bcrypt.compare(plainPassword, hashedPassword);
+  }
+
+  // Check if email exists
+  static async emailExists(email) {
+    const [rows] = await pool.query(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
+    );
+    return rows.length > 0;
+  }
+}
 
 export default User;
-

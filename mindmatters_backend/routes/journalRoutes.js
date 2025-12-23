@@ -1,44 +1,25 @@
 // routes/journalRoutes.js
 import express from "express";
-import mongoose from "mongoose";
+import pool from "../config/database.js";
 
 const router = express.Router();
-
-// Journal Entry Schema
-const journalEntrySchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
-  },
-  date: { type: Date, default: Date.now },
-  mood: { 
-    type: String, 
-    required: true,
-    enum: ['very-happy', 'happy', 'neutral', 'sad', 'very-sad', 'anxious', 'excited', 'calm']
-  },
-  title: { type: String, required: true },
-  content: { type: String, required: true },
-  tags: [String],
-  moodScore: { type: Number, min: 1, max: 10 }
-}, { timestamps: true });
-
-const JournalEntry = mongoose.model("JournalEntry", journalEntrySchema);
-
-// Chat Message Schema for storing conversation history
-const chatMessageSchema = new mongoose.Schema({
-  message: { type: String, required: true },
-  response: { type: String, required: true },
-  timestamp: { type: Date, default: Date.now }
-});
-
-const ChatMessage = mongoose.model("ChatMessage", chatMessageSchema);
 
 // Get all journal entries for the logged-in user
 router.get("/", async (req, res) => {
   try {
-    const entries = await JournalEntry.find({ user: req.user._id }).sort({ createdAt: -1 });
-    res.json(entries);
+    const [entries] = await pool.query(
+      "SELECT * FROM journal_entries WHERE user_id = ? ORDER BY created_at DESC",
+      [req.user.id]
+    );
+    
+    // Parse JSON tags if they exist
+    const formattedEntries = entries.map(entry => ({
+      ...entry,
+      tags: entry.tags ? JSON.parse(entry.tags) : [],
+      _id: entry.id,
+    }));
+    
+    res.json(formattedEntries);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -47,10 +28,19 @@ router.get("/", async (req, res) => {
 // Get a single journal entry
 router.get("/:id", async (req, res) => {
   try {
-    const entry = await JournalEntry.findOne({ _id: req.params.id, user: req.user._id });
-    if (!entry) {
+    const [rows] = await pool.query(
+      "SELECT * FROM journal_entries WHERE id = ? AND user_id = ?",
+      [req.params.id, req.user.id]
+    );
+    
+    if (rows.length === 0) {
       return res.status(404).json({ message: "Entry not found" });
     }
+    
+    const entry = rows[0];
+    entry.tags = entry.tags ? JSON.parse(entry.tags) : [];
+    entry._id = entry.id;
+    
     res.json(entry);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -62,17 +52,28 @@ router.post("/", async (req, res) => {
   try {
     const { mood, title, content, tags, moodScore } = req.body;
     
-    const newEntry = new JournalEntry({
-      user: req.user._id,
-      mood,
-      title,
-      content,
-      tags: tags || [],
-      moodScore
-    });
+    const [result] = await pool.query(
+      "INSERT INTO journal_entries (user_id, mood, title, content, tags, mood_score) VALUES (?, ?, ?, ?, ?, ?)",
+      [
+        req.user.id,
+        mood,
+        title,
+        content,
+        JSON.stringify(tags || []),
+        moodScore || null,
+      ]
+    );
 
-    const savedEntry = await newEntry.save();
-    res.status(201).json(savedEntry);
+    const [newEntry] = await pool.query(
+      "SELECT * FROM journal_entries WHERE id = ?",
+      [result.insertId]
+    );
+
+    const entry = newEntry[0];
+    entry.tags = entry.tags ? JSON.parse(entry.tags) : [];
+    entry._id = entry.id;
+
+    res.status(201).json(entry);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -81,15 +82,35 @@ router.post("/", async (req, res) => {
 // Update journal entry
 router.put("/:id", async (req, res) => {
   try {
-    const updatedEntry = await JournalEntry.findOneAndUpdate(
-      { _id: req.params.id, user: req.user._id },
-      req.body,
-      { new: true }
+    const { mood, title, content, tags, moodScore } = req.body;
+    
+    const [result] = await pool.query(
+      "UPDATE journal_entries SET mood = ?, title = ?, content = ?, tags = ?, mood_score = ? WHERE id = ? AND user_id = ?",
+      [
+        mood,
+        title,
+        content,
+        JSON.stringify(tags || []),
+        moodScore || null,
+        req.params.id,
+        req.user.id,
+      ]
     );
-    if (!updatedEntry) {
+
+    if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Entry not found" });
     }
-    res.json(updatedEntry);
+
+    const [updatedEntry] = await pool.query(
+      "SELECT * FROM journal_entries WHERE id = ?",
+      [req.params.id]
+    );
+
+    const entry = updatedEntry[0];
+    entry.tags = entry.tags ? JSON.parse(entry.tags) : [];
+    entry._id = entry.id;
+
+    res.json(entry);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -98,13 +119,15 @@ router.put("/:id", async (req, res) => {
 // Delete journal entry
 router.delete("/:id", async (req, res) => {
   try {
-    const deletedEntry = await JournalEntry.findOneAndDelete({ 
-      _id: req.params.id, 
-      user: req.user._id 
-    });
-    if (!deletedEntry) {
+    const [result] = await pool.query(
+      "DELETE FROM journal_entries WHERE id = ? AND user_id = ?",
+      [req.params.id, req.user.id]
+    );
+
+    if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Entry not found" });
     }
+
     res.json({ message: "Entry deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -164,11 +187,10 @@ router.post("/chat", async (req, res) => {
     }
 
     // Save chat history
-    const chatEntry = new ChatMessage({
-      message,
-      response: botResponse
-    });
-    await chatEntry.save();
+    await pool.query(
+      "INSERT INTO chat_messages (user_id, message, response) VALUES (?, ?, ?)",
+      [req.user.id, message, botResponse]
+    );
 
     res.json({ response: botResponse });
   } catch (error) {
@@ -182,9 +204,10 @@ router.post("/chat", async (req, res) => {
 // Get chat history
 router.get("/chat/history", async (req, res) => {
   try {
-    const chatHistory = await ChatMessage.find()
-      .sort({ timestamp: -1 })
-      .limit(50);
+    const [chatHistory] = await pool.query(
+      "SELECT * FROM chat_messages WHERE user_id = ? ORDER BY timestamp DESC LIMIT 50",
+      [req.user.id]
+    );
     res.json(chatHistory);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -197,20 +220,18 @@ router.get("/analytics/mood-trends", async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const moodTrends = await JournalEntry.aggregate([
-      { $match: { user: req.user._id, createdAt: { $gte: thirtyDaysAgo } } },
-      {
-        $group: {
-          _id: {
-            date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-            mood: "$mood"
-          },
-          count: { $sum: 1 },
-          avgScore: { $avg: "$moodScore" }
-        }
-      },
-      { $sort: { "_id.date": 1 } }
-    ]);
+    const [moodTrends] = await pool.query(
+      `SELECT 
+        DATE(created_at) as date,
+        mood,
+        COUNT(*) as count,
+        AVG(mood_score) as avgScore
+      FROM journal_entries 
+      WHERE user_id = ? AND created_at >= ?
+      GROUP BY DATE(created_at), mood
+      ORDER BY date ASC`,
+      [req.user.id, thirtyDaysAgo]
+    );
 
     res.json(moodTrends);
   } catch (error) {
