@@ -1,7 +1,12 @@
 // pages/JournalPage.js - Updated to match website theme
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const JournalPage = () => {
+  const { isAuthenticated, getAuthHeaders, user } = useAuth();
+  const navigate = useNavigate();
+  
   // Journal state
   const [entries, setEntries] = useState([]);
   const [currentEntry, setCurrentEntry] = useState({
@@ -14,10 +19,61 @@ const JournalPage = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Error and success states
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate("/login");
+    }
+  }, [isAuthenticated, navigate]);
+
+  // Fetch entries from backend
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchEntries();
+    }
+  }, [isAuthenticated]);
+
+  const fetchEntries = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch("http://localhost:5000/api/journal", {
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 401) {
+        navigate("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch entries");
+      }
+
+      const data = await response.json();
+      // Convert backend format to frontend format
+      const formattedEntries = data.map(entry => ({
+        _id: entry.id,
+        mood: entry.mood,
+        title: entry.title,
+        content: entry.content,
+        tags: Array.isArray(entry.tags) ? entry.tags : (entry.tags ? JSON.parse(entry.tags) : []),
+        moodScore: entry.mood_score,
+        createdAt: entry.created_at
+      }));
+      setEntries(formattedEntries);
+    } catch (err) {
+      setError("Failed to load journal entries. Please try again.");
+      console.error("Error fetching entries:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Mood options
   const moodOptions = [
@@ -42,7 +98,7 @@ const JournalPage = () => {
     }
   }, [error, success]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
@@ -53,25 +109,56 @@ const JournalPage = () => {
       return;
     }
     
+    const tagsArray = currentEntry.tags
+      .split(",")
+      .map(tag => tag.trim())
+      .filter(tag => tag);
+
     const entryData = {
-      _id: isEditing ? editingId : Date.now().toString(),
-      ...currentEntry,
-      tags: currentEntry.tags.split(",").map(tag => tag.trim()).filter(tag => tag),
-      createdAt: isEditing ? entries.find(e => e._id === editingId)?.createdAt : new Date()
+      mood: currentEntry.mood,
+      title: currentEntry.title,
+      content: currentEntry.content,
+      tags: tagsArray,
+      moodScore: currentEntry.moodScore || 5
     };
 
-    // Save to local state (simulating database)
-    if (isEditing) {
-      setEntries(prev => prev.map(entry => 
-        entry._id === editingId ? entryData : entry
-      ));
-      setSuccess("Entry updated successfully!");
-    } else {
-      setEntries(prev => [entryData, ...prev]);
-      setSuccess("Entry saved successfully!");
+    try {
+      let response;
+      if (isEditing) {
+        // Update existing entry
+        response = await fetch(`http://localhost:5000/api/journal/${editingId}`, {
+          method: "PUT",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(entryData),
+        });
+      } else {
+        // Create new entry
+        response = await fetch("http://localhost:5000/api/journal", {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(entryData),
+        });
+      }
+
+      if (response.status === 401) {
+        navigate("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Failed to save entry");
+      }
+
+      const savedEntry = await response.json();
+      setSuccess(isEditing ? "Entry updated successfully!" : "Entry saved successfully!");
+      
+      // Refresh entries
+      await fetchEntries();
+      resetForm();
+    } catch (err) {
+      setError("Failed to save entry. Please try again.");
+      console.error("Error saving entry:", err);
     }
-    
-    resetForm();
   };
 
   const handleEdit = (entry) => {
@@ -87,10 +174,32 @@ const JournalPage = () => {
     setShowForm(true);
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm("Are you sure you want to delete this entry?")) {
-      setEntries(prev => prev.filter(entry => entry._id !== id));
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this entry?")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/journal/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 401) {
+        navigate("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Failed to delete entry");
+      }
+
       setSuccess("Entry deleted successfully!");
+      // Refresh entries
+      await fetchEntries();
+    } catch (err) {
+      setError("Failed to delete entry. Please try again.");
+      console.error("Error deleting entry:", err);
     }
   };
 
@@ -708,7 +817,11 @@ const JournalPage = () => {
           {/* Journal Entries List */}
           <div className="entries-container">
             <h3>Your Journal Entries ({entries.length})</h3>
-            {entries.length === 0 ? (
+            {loading ? (
+              <div className="empty-state">
+                <p>⏳ Loading your journal entries...</p>
+              </div>
+            ) : entries.length === 0 ? (
               <div className="empty-state">
                 <p>📝 No entries yet. Start by creating your first mood journal entry!</p>
                 <button 

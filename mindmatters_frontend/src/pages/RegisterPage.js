@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -9,6 +10,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,12 +43,11 @@ export default function RegisterPage() {
         throw new Error(data.message || "Registration failed");
       }
 
-      // Store token and user info
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      // Store token and user info using AuthContext
+      login(data.token, data.user);
 
-      // Redirect to home
-      navigate("/");
+      // Redirect to journal page (main feature)
+      navigate("/journal");
     } catch (err) {
       setError(err.message);
     } finally {

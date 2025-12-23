@@ -4,10 +4,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Create connection pool
+// Remove quotes from password if present
+const dbPassword = process.env.DB_PASSWORD?.replace(/^["']|["']$/g, '') || "";
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
   user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
+  password: dbPassword,
   database: process.env.DB_NAME || "mindmatters",
   waitForConnections: true,
   connectionLimit: 10,
@@ -68,6 +71,17 @@ async function initializeTables() {
         response TEXT NOT NULL,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+
+    // Assessment results table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS assessment_results (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        score INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
 

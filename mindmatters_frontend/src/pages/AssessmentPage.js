@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const questions = [
   "I feel mentally exhausted at the end of the day.",
@@ -7,7 +8,7 @@ const questions = [
   "I find it hard to relax even when I have time.",
   "I feel supported emotionally by others.",
   "I feel hopeful about my future.",
-  "I worry about things I can’t control.",
+  "I worry about things I can't control.",
   "I find joy in everyday moments.",
   "I have frequent mood changes.",
   "I struggle with sleep or rest.",
@@ -21,10 +22,17 @@ const options = [
 ];
 
 export default function AssessmentPage() {
-  const [answers, setAnswers] = useState(Array(10).fill(null));
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const { isAuthenticated, user, getAuthHeaders, navigate: authNavigate } = useAuth();
   const navigate = useNavigate();
+  const [answers, setAnswers] = useState(Array(10).fill(null));
+  const [loading, setLoading] = useState(false);
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate("/login");
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleAnswer = (index, value) => {
     const updated = [...answers];
@@ -33,31 +41,43 @@ export default function AssessmentPage() {
   };
 
   const handleSubmit = async () => {
-    if (!name || !email || answers.includes(null)) {
-      alert("Please complete all questions and provide your details.");
+    if (answers.includes(null)) {
+      alert("Please complete all questions.");
+      return;
+    }
+
+    if (!isAuthenticated || !user) {
+      alert("Please login to take the assessment.");
+      navigate("/login");
       return;
     }
 
     const totalScore = answers.reduce((a, b) => a + b, 0);
+    setLoading(true);
 
     try {
       const response = await fetch("http://localhost:5000/api/assessment", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ name, email, score: totalScore })
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ score: totalScore })
       });
+
+      if (response.status === 401) {
+        navigate("/login");
+        return;
+      }
 
       if (!response.ok) {
         throw new Error("Failed to submit assessment");
       }
 
       navigate("/result", {
-        state: { name, email, score: totalScore }
+        state: { name: user.name, email: user.email, score: totalScore }
       });
     } catch (err) {
       alert("Error submitting: " + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -217,21 +237,12 @@ export default function AssessmentPage() {
 
       <div className="form-box">
         <div className="form-header">Mental Health Self-Assessment</div>
-
-        <div className="input-group">
-          <input
-            type="text"
-            placeholder="Your Full Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <input
-            type="email"
-            placeholder="Your Email Address"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </div>
+        {user && (
+          <div style={{ textAlign: "center", color: "#cbd5e1", marginBottom: "20px" }}>
+            <p>Welcome, <strong>{user.name}</strong>!</p>
+            <p style={{ fontSize: "14px" }}>Please answer all questions honestly.</p>
+          </div>
+        )}
 
         {questions.map((question, index) => (
           <div className="question-card" key={index}>
@@ -254,8 +265,8 @@ export default function AssessmentPage() {
           </div>
         ))}
 
-        <button className="submit-btn" onClick={handleSubmit}>
-          Submit Assessment
+        <button className="submit-btn" onClick={handleSubmit} disabled={loading}>
+          {loading ? "Submitting..." : "Submit Assessment"}
         </button>
       </div>
     </div>
