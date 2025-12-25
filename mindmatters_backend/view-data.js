@@ -1,3 +1,4 @@
+
 // Script to view all entered details from command line
 import pool from "./config/database.js";
 
@@ -114,4 +115,5 @@ async function viewAllData() {
 }
 
 viewAllData();
+
 

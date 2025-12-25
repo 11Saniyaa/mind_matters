@@ -13,11 +13,27 @@ router.get("/", async (req, res) => {
     );
     
     // Parse JSON tags if they exist
-    const formattedEntries = entries.map(entry => ({
-      ...entry,
-      tags: entry.tags ? JSON.parse(entry.tags) : [],
-      _id: entry.id,
-    }));
+    const formattedEntries = entries.map(entry => {
+      let tags = [];
+      try {
+        if (entry.tags) {
+          if (typeof entry.tags === 'string') {
+            tags = JSON.parse(entry.tags);
+          } else if (Array.isArray(entry.tags)) {
+            tags = entry.tags;
+          }
+        }
+      } catch (e) {
+        console.warn("Error parsing tags for entry", entry.id, e);
+        tags = [];
+      }
+      
+      return {
+        ...entry,
+        tags: tags,
+        _id: entry.id,
+      };
+    });
     
     res.json(formattedEntries);
   } catch (error) {
@@ -38,7 +54,23 @@ router.get("/:id", async (req, res) => {
     }
     
     const entry = rows[0];
-    entry.tags = entry.tags ? JSON.parse(entry.tags) : [];
+    
+    // Parse tags safely
+    let tags = [];
+    try {
+      if (entry.tags) {
+        if (typeof entry.tags === 'string') {
+          tags = JSON.parse(entry.tags);
+        } else if (Array.isArray(entry.tags)) {
+          tags = entry.tags;
+        }
+      }
+    } catch (e) {
+      console.warn("Error parsing tags:", e);
+      tags = [];
+    }
+    
+    entry.tags = tags;
     entry._id = entry.id;
     
     res.json(entry);
@@ -51,6 +83,20 @@ router.get("/:id", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const { mood, title, content, tags, moodScore } = req.body;
+    
+    console.log("📝 Creating journal entry for user:", req.user.id);
+    console.log("Data received:", { mood, title, content: content?.substring(0, 50), tags, moodScore });
+    
+    // Validation
+    if (!mood || !title || !content) {
+      console.error("❌ Validation failed - missing fields");
+      return res.status(400).json({ message: "Mood, title, and content are required" });
+    }
+
+    if (!req.user || !req.user.id) {
+      console.error("❌ User not authenticated");
+      return res.status(401).json({ message: "User not authenticated" });
+    }
     
     const [result] = await pool.query(
       "INSERT INTO journal_entries (user_id, mood, title, content, tags, mood_score) VALUES (?, ?, ?, ?, ?, ?)",
@@ -69,13 +115,36 @@ router.post("/", async (req, res) => {
       [result.insertId]
     );
 
+    if (!newEntry || newEntry.length === 0) {
+      return res.status(500).json({ message: "Failed to retrieve saved entry" });
+    }
+
     const entry = newEntry[0];
-    entry.tags = entry.tags ? JSON.parse(entry.tags) : [];
+    
+    // Parse tags safely
+    let tags = [];
+    try {
+      if (entry.tags) {
+        if (typeof entry.tags === 'string') {
+          tags = JSON.parse(entry.tags);
+        } else if (Array.isArray(entry.tags)) {
+          tags = entry.tags;
+        }
+      }
+    } catch (e) {
+      console.warn("Error parsing tags:", e);
+      tags = [];
+    }
+    
+    entry.tags = tags;
     entry._id = entry.id;
 
+    console.log("✅ Journal entry created successfully:", entry.id);
     res.status(201).json(entry);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error("❌ Error creating journal entry:", error);
+    console.error("Error details:", error.message, error.stack);
+    res.status(500).json({ message: error.message || "Failed to save journal entry" });
   }
 });
 
@@ -107,7 +176,23 @@ router.put("/:id", async (req, res) => {
     );
 
     const entry = updatedEntry[0];
-    entry.tags = entry.tags ? JSON.parse(entry.tags) : [];
+    
+    // Parse tags safely
+    let tags = [];
+    try {
+      if (entry.tags) {
+        if (typeof entry.tags === 'string') {
+          tags = JSON.parse(entry.tags);
+        } else if (Array.isArray(entry.tags)) {
+          tags = entry.tags;
+        }
+      }
+    } catch (e) {
+      console.warn("Error parsing tags:", e);
+      tags = [];
+    }
+    
+    entry.tags = tags;
     entry._id = entry.id;
 
     res.json(entry);

@@ -100,3 +100,4 @@ JOIN users u ON cm.user_id = u.id
 ORDER BY created_at DESC
 LIMIT 10;
 
+

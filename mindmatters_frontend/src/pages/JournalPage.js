@@ -57,15 +57,31 @@ const JournalPage = () => {
 
       const data = await response.json();
       // Convert backend format to frontend format
-      const formattedEntries = data.map(entry => ({
-        _id: entry.id,
-        mood: entry.mood,
-        title: entry.title,
-        content: entry.content,
-        tags: Array.isArray(entry.tags) ? entry.tags : (entry.tags ? JSON.parse(entry.tags) : []),
-        moodScore: entry.mood_score,
-        createdAt: entry.created_at
-      }));
+      const formattedEntries = data.map(entry => {
+        let tags = [];
+        try {
+          if (Array.isArray(entry.tags)) {
+            tags = entry.tags;
+          } else if (entry.tags) {
+            // Try to parse as JSON
+            const parsed = typeof entry.tags === 'string' ? JSON.parse(entry.tags) : entry.tags;
+            tags = Array.isArray(parsed) ? parsed : [];
+          }
+        } catch (e) {
+          console.warn("Error parsing tags:", e);
+          tags = [];
+        }
+        
+        return {
+          _id: entry.id || entry.id,
+          mood: entry.mood,
+          title: entry.title,
+          content: entry.content,
+          tags: tags,
+          moodScore: entry.mood_score || entry.moodScore,
+          createdAt: entry.created_at || entry.createdAt
+        };
+      });
       setEntries(formattedEntries);
     } catch (err) {
       setError("Failed to load journal entries. Please try again.");
@@ -146,18 +162,30 @@ const JournalPage = () => {
       }
 
       if (!response.ok) {
-        throw new Error("Failed to save entry");
+        let errorMessage = "Failed to save entry";
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const savedEntry = await response.json();
       setSuccess(isEditing ? "Entry updated successfully!" : "Entry saved successfully!");
       
-      // Refresh entries
-      await fetchEntries();
+      // Refresh entries after a short delay
+      setTimeout(async () => {
+        await fetchEntries();
+      }, 500);
+      
       resetForm();
     } catch (err) {
-      setError("Failed to save entry. Please try again.");
+      const errorMsg = err.message || "Failed to save entry. Please try again.";
+      setError(errorMsg);
       console.error("Error saving entry:", err);
+      console.error("Full error:", JSON.stringify(err, null, 2));
     }
   };
 
